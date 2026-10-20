@@ -1,7 +1,6 @@
 """Registro de importadores.
 
-=== STUB: por implementar. Tests: tests/test_importers.py ===
-(Implementación comentada de referencia en la rama spike/v0.1-referencia.)
+=== IMPLEMENTACIÓN DE REFERENCIA (rama spike/v0.1-referencia) ===
 
 Para agregar una herramienta nueva: crear su importador y sumarlo a IMPORTADORES.
 Nada más del sistema necesita cambiar (RNF5, extensible).
@@ -27,9 +26,16 @@ class FormatoDesconocido(ValueError):
 
 def detectar_importador(ruta: Path) -> Importador:
     """Prueba cada importador hasta que uno reconozca el archivo."""
-    raise NotImplementedError("detectar_importador(): probar cada importador en orden")
+    for importador in IMPORTADORES:
+        if importador.detectar(ruta):
+            return importador
+    nombres = ", ".join(i.herramienta for i in IMPORTADORES)
+    raise FormatoDesconocido(f"ningún importador reconoce {ruta.name} (disponibles: {nombres})")
 
 
 def obtener_importador(herramienta: str) -> Importador:
     """Devuelve el importador por su nombre, para cuando el usuario lo indica a mano."""
-    raise NotImplementedError("obtener_importador(): buscar por nombre")
+    for importador in IMPORTADORES:
+        if importador.herramienta == herramienta.lower():
+            return importador
+    raise FormatoDesconocido(f"no existe un importador llamado {herramienta!r}")

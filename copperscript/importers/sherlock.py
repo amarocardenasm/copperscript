@@ -1,7 +1,6 @@
 """Importador de Sherlock (github.com/sherlock-project/sherlock).
 
-=== STUB: por implementar. Tests: tests/test_importers.py ===
-(Implementación comentada de referencia en la rama spike/v0.1-referencia.)
+=== IMPLEMENTACIÓN DE REFERENCIA (rama spike/v0.1-referencia) ===
 
 Sherlock busca un nombre de usuario en cientos de sitios. Produce dos formatos:
 
@@ -31,10 +30,11 @@ sitios que responden "existe" para cualquier nombre. Esos datos quedan como
 
 from __future__ import annotations
 
+import csv
 from collections.abc import Iterator
 from pathlib import Path
 
-from copperscript.core.models import Observacion
+from copperscript.core.models import Observacion, RefEntidad, TipoEntidad
 from copperscript.importers.base import Importador
 
 _COLUMNAS_CSV = {"username", "url_user", "exists"}
@@ -46,23 +46,79 @@ class ImportadorSherlock(Importador):
     confianza_base = 0.4
 
     def detectar(self, ruta: Path) -> bool:
-        """True si es un CSV de Sherlock (cabecera con username, url_user y exists)
-        o un TXT de Sherlock (archivo .txt que termina con la línea de total).
-
-        Pista: leer solo la primera línea y, para el TXT, solo el final del archivo.
-        """
-        raise NotImplementedError("ImportadorSherlock.detectar()")
+        primera = _primera_linea(ruta)
+        if primera is None:
+            return False
+        # Formato CSV: la cabecera trae las columnas que necesitamos.
+        columnas = {c.strip() for c in primera.split(",")}
+        if _COLUMNAS_CSV <= columnas:  # <= entre sets significa "es subconjunto de"
+            return True
+        # Formato TXT: termina con la línea de total.
+        if ruta.suffix.lower() == ".txt":
+            return any(linea.startswith(_LINEA_TOTAL) for linea in _ultimas_lineas(ruta))
+        return False
 
     def importar(self, ruta: Path) -> Iterator[Observacion]:
-        """Una Observacion por cuenta encontrada:
+        primera = _primera_linea(ruta) or ""
+        if "url_user" in primera:
+            yield from self._importar_csv(ruta)
+        else:
+            yield from self._importar_txt(ruta)
 
-            entidad  = RefEntidad(CUENTA, url_user)
-            origen   = RefEntidad(USUARIO, username)
-            relacion = "tiene_cuenta"
-            confianza_fuente = self.confianza_base
-            atributos = {"plataforma": name, "url_plataforma": url_main, ...}
+    def _importar_csv(self, ruta: Path) -> Iterator[Observacion]:
+        # newline="" es lo que pide el módulo csv: así maneja él los saltos de
+        # línea, incluidos los que vienen dentro de un campo entre comillas.
+        with ruta.open(newline="", encoding="utf-8") as archivo:
+            for fila in csv.DictReader(
+                archivo
+            ):  # DictReader: cada fila es un dict por nombre de columna
+                if (fila.get("exists") or "").strip().lower() != "claimed":
+                    continue
+                yield self._observacion(
+                    usuario=fila["username"],
+                    url=fila["url_user"],
+                    atributos={
+                        "plataforma": fila.get("name"),
+                        "url_plataforma": fila.get("url_main"),
+                        "http_status": fila.get("http_status"),
+                    },
+                )
 
-        CSV: solo filas con exists == "Claimed" (usar csv.DictReader).
-        TXT: el usuario es el nombre del archivo sin extensión (ruta.stem).
-        """
-        raise NotImplementedError("ImportadorSherlock.importar()")
+    def _importar_txt(self, ruta: Path) -> Iterator[Observacion]:
+        # En el TXT el usuario no aparece dentro del archivo: está en el nombre.
+        # "amaro_dev.txt" -> stem = "amaro_dev"
+        usuario = ruta.stem
+        with ruta.open(encoding="utf-8") as archivo:
+            for linea in archivo:
+                linea = linea.strip()
+                if linea.startswith(("http://", "https://")):
+                    yield self._observacion(usuario=usuario, url=linea, atributos={})
+
+    def _observacion(self, usuario: str, url: str, atributos: dict) -> Observacion:
+        return Observacion(
+            entidad=RefEntidad(TipoEntidad.CUENTA, url),
+            origen=RefEntidad(TipoEntidad.USUARIO, usuario),
+            relacion="tiene_cuenta",
+            confianza_fuente=self.confianza_base,
+            atributos=atributos,
+        )
+
+
+def _primera_linea(ruta: Path) -> str | None:
+    try:
+        with ruta.open(encoding="utf-8") as archivo:
+            return archivo.readline().strip()
+    except (UnicodeDecodeError, OSError):
+        return None  # binario o ilegible: claramente no es de Sherlock
+
+
+def _ultimas_lineas(ruta: Path, cantidad: int = 3) -> list[str]:
+    # Leemos solo el final del archivo (los últimos 4 KB) para que detectar
+    # sea barato aunque el archivo sea grande.
+    with ruta.open("rb") as archivo:
+        archivo.seek(0, 2)  # 2 = desde el final; nos dice el tamaño
+        tamano = archivo.tell()
+        archivo.seek(max(0, tamano - 4096))
+        cola = archivo.read().decode("utf-8", errors="ignore")
+    lineas = [linea.strip() for linea in cola.splitlines() if linea.strip()]
+    return lineas[-cantidad:]

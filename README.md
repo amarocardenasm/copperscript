@@ -1,5 +1,7 @@
 # copperscript
 
+> ⚠️ **You are on `spike/v0.1-referencia`.** This branch is a complete, heavily commented reference implementation (comments in Spanish) used for learning and to anticipate design problems. It is **never merged into `main`**; `main` is implemented step by step from its stubs.
+
 **copperscript** is an open-source OSINT tool that organizes collected data and displays it as an interactive graph.
 
 Raw collection is noisy: results are often incomplete, duplicated or uncertain. copperscript normalizes and deduplicates findings, tracks where each one came from and how confident we are in it, and uses Markov chains learned from past investigations to suggest the most promising next steps — so you spend your queries, API quota and time where they matter most.

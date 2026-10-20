@@ -1,7 +1,6 @@
 """Importador de SpiderFoot (github.com/smicallef/spiderfoot).
 
-=== STUB: por implementar. Tests: tests/test_importers.py ===
-(Implementación comentada de referencia en la rama spike/v0.1-referencia.)
+=== IMPLEMENTACIÓN DE REFERENCIA (rama spike/v0.1-referencia) ===
 
 SpiderFoot exporta JSON de dos formas distintas (revisado en su código fuente):
 
@@ -30,10 +29,13 @@ después armamos las relaciones.
 
 from __future__ import annotations
 
+import ipaddress
+import json
+import re
 from collections.abc import Iterator
 from pathlib import Path
 
-from copperscript.core.models import Observacion, TipoEntidad
+from copperscript.core.models import Observacion, RefEntidad, TipoEntidad
 from copperscript.importers.base import Importador
 
 # Mapeo de tipos de SpiderFoot (código y descripción) a nuestros tipos.
@@ -63,25 +65,87 @@ _TIPOS = {
     "Linked URL - Internal": TipoEntidad.URL,
 }
 
+_RE_EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_RE_DOMINIO = re.compile(r"^(?=.{1,253}$)([a-z0-9-]{1,63}\.)+[a-z]{2,63}\.?$", re.IGNORECASE)
+
 
 class ImportadorSpiderFoot(Importador):
     herramienta = "spiderfoot"
     confianza_base = 0.7  # mezcla de módulos buenos y ruidosos
 
     def detectar(self, ruta: Path) -> bool:
-        """True si los primeros 4 KB empiezan con "[" y contienen "module" y "data"."""
-        raise NotImplementedError("ImportadorSpiderFoot.detectar()")
+        # Barato: miramos solo los primeros 4 KB.
+        try:
+            with ruta.open(encoding="utf-8") as archivo:
+                inicio = archivo.read(4096).lstrip()
+        except (UnicodeDecodeError, OSError):
+            return False
+        return inicio.startswith("[") and '"module"' in inicio and '"data"' in inicio
 
     def importar(self, ruta: Path) -> Iterator[Observacion]:
-        """Una Observacion por evento con tipo conocido (ver _TIPOS).
+        # json.load carga todo el archivo en memoria. Para escaneos enormes
+        # (cientos de MB) habría que leerlo en streaming con la librería ijson.
+        # Queda anotado como mejora futura; para v0.1 basta.
+        with ruta.open(encoding="utf-8") as archivo:
+            eventos = json.load(archivo)
 
-        - Aceptar ambos formatos: clave "type" o "event_type"; "source" o "source_data".
-        - Saltar eventos con false_positive verdadero.
-        - Dos pasadas: (1) anotar el tipo de cada valor; (2) crear observaciones
-          con origen = padre y relacion = "descubierto_desde".
-        - Si el padre no aparece como evento (es la semilla), adivinar su tipo
-          por su forma (IP, email o dominio). Si no se puede, sin origen.
-        - Confianza 0.9 para módulos "sfp_dns*", si no self.confianza_base.
-        - atributos = {"modulo": ..., "tipo_spiderfoot": ...}
-        """
-        raise NotImplementedError("ImportadorSpiderFoot.importar()")
+        # Pasada 1: qué tipo tiene cada valor que aparece en el escaneo.
+        tipo_de_valor: dict[str, TipoEntidad] = {}
+        for evento in eventos:
+            tipo = _tipo_de(evento)
+            if tipo is not None:
+                tipo_de_valor.setdefault(str(evento.get("data", "")).strip(), tipo)
+
+        # Pasada 2: una observación por evento, con su arista al padre si podemos.
+        for evento in eventos:
+            tipo = _tipo_de(evento)
+            if tipo is None or evento.get("false_positive"):
+                continue
+            dato = str(evento.get("data", "")).strip()
+            padre = str(evento.get("source") or evento.get("source_data") or "").strip()
+            modulo = str(evento.get("module", ""))
+
+            origen = None
+            if padre and padre != "ROOT" and padre != dato:
+                # Si el padre no apareció como evento propio, es la semilla del
+                # escaneo (el objetivo): adivinamos su tipo por su forma.
+                tipo_padre = tipo_de_valor.get(padre) or _adivinar_tipo(padre)
+                if tipo_padre is not None:
+                    origen = RefEntidad(tipo_padre, padre)
+
+            yield Observacion(
+                entidad=RefEntidad(tipo, dato),
+                origen=origen,
+                relacion="descubierto_desde" if origen else None,
+                confianza_fuente=self._confianza(modulo),
+                atributos={
+                    "modulo": modulo,
+                    "tipo_spiderfoot": evento.get("type") or evento.get("event_type"),
+                },
+            )
+
+    def _confianza(self, modulo: str) -> float:
+        # Los módulos de DNS consultan directamente la fuente autoritativa:
+        # son mucho más confiables que, por ejemplo, el scraping de buscadores.
+        if modulo.startswith("sfp_dns"):
+            return 0.9
+        return self.confianza_base
+
+
+def _tipo_de(evento: dict) -> TipoEntidad | None:
+    clave = evento.get("event_type") or evento.get("type")
+    return _TIPOS.get(str(clave)) if clave else None
+
+
+def _adivinar_tipo(valor: str) -> TipoEntidad | None:
+    """Tipo probable de un valor suelto, por su forma. None si no hay certeza."""
+    try:
+        ip = ipaddress.ip_address(valor)
+        return TipoEntidad.IPV4 if ip.version == 4 else TipoEntidad.IPV6
+    except ValueError:
+        pass
+    if _RE_EMAIL.match(valor):
+        return TipoEntidad.EMAIL
+    if _RE_DOMINIO.match(valor):
+        return TipoEntidad.DOMINIO
+    return None

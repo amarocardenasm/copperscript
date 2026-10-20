@@ -1,7 +1,6 @@
 """Exportador a una página HTML con el grafo interactivo (Cytoscape.js).
 
-=== STUB: por implementar. Tests: tests/test_caso.py ===
-(Implementación comentada de referencia en la rama spike/v0.1-referencia.)
+=== IMPLEMENTACIÓN DE REFERENCIA (rama spike/v0.1-referencia) ===
 
 Es el "abuelo" de la futura interfaz web local (ADR-002): un solo archivo
 HTML que se abre con doble clic y muestra el grafo del caso.
@@ -13,6 +12,8 @@ librería debe ir incluida dentro del paquete (ADR-006).
 
 from __future__ import annotations
 
+import html
+import json
 from pathlib import Path
 
 from copperscript.core.store import Caso
@@ -34,16 +35,43 @@ _COLORES = {
 
 
 def exportar_html(caso: Caso) -> Path:
-    """Escribe exports/grafo.html y devuelve su ruta.
+    """Escribe exports/grafo.html y devuelve su ruta."""
+    # Cytoscape recibe "elementos": nodos y aristas en un mismo arreglo JSON.
+    elementos = []
+    for e in caso.entidades():
+        elementos.append(
+            {
+                "data": {
+                    "id": f"n{e.id}",
+                    "label": e.valor,
+                    "tipo": str(e.tipo),
+                    "confianza": e.confianza,
+                    "color": _COLORES.get(str(e.tipo), "#9ca3af"),
+                }
+            }
+        )
+    for r in caso.relaciones():
+        elementos.append(
+            {
+                "data": {
+                    "id": f"r{r.id}",
+                    "source": f"n{r.origen_id}",
+                    "target": f"n{r.destino_id}",
+                    "label": r.tipo,
+                }
+            }
+        )
 
-    - Armar la lista de "elementos" de Cytoscape:
-        nodo:   {"data": {"id": "n<id>", "label": valor, "tipo": ..., "confianza": ..., "color": ...}}
-        arista: {"data": {"id": "r<id>", "source": "n<origen>", "target": "n<destino>", "label": tipo}}
-    - Reemplazar __TITULO__ (escapado con html.escape), __CDN__ y __DATOS__ en _PLANTILLA.
-    - Seguridad: al meter JSON dentro de <script>, reemplazar "</" por "<\\/".
-      Si no, un valor como "</script><script>..." inyectaría código en la página.
-    """
-    raise NotImplementedError("exportar_html()")
+    nombre = caso.metadatos().get("nombre", "caso")
+    # Al meter JSON dentro de <script>, "</" podría cerrar la etiqueta antes
+    # de tiempo (y es una vía clásica de inyección). Lo escapamos.
+    datos = json.dumps(elementos, ensure_ascii=False).replace("</", "<\\/")
+    pagina = _PLANTILLA.replace("__TITULO__", html.escape(nombre))
+    pagina = pagina.replace("__CDN__", _CDN_CYTOSCAPE).replace("__DATOS__", datos)
+
+    destino = caso.carpeta_exports / "grafo.html"
+    destino.write_text(pagina, encoding="utf-8")
+    return destino
 
 
 _PLANTILLA = """<!doctype html>
