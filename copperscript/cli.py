@@ -182,12 +182,18 @@ def hipotesis_ver(carpeta: Annotated[Path, typer.Argument(help="Carpeta del caso
 def exportar(
     carpeta: Annotated[Path, typer.Argument(help="Carpeta del caso.")],
     formato: Annotated[Formato, typer.Argument(help="obsidian o html.")],
+    minimo: Annotated[
+        float,
+        typer.Option(help="Obsidian: solo entidades con confianza (y atribución) >= este valor."),
+    ] = 0.0,
 ) -> None:
     """Exporta el caso (a exports/ dentro de la carpeta del caso)."""
     try:
         with Caso.abrir(carpeta) as caso:
             destino = (
-                exportar_obsidian(caso) if formato is Formato.obsidian else exportar_html(caso)
+                exportar_obsidian(caso, minimo)
+                if formato is Formato.obsidian
+                else exportar_html(caso)
             )
     except CasoNoEncontrado as error:
         _fallar(str(error))

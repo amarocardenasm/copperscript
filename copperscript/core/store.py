@@ -460,8 +460,37 @@ class Caso:
 
     def buscar(self, tipo: TipoEntidad, valor: str) -> Entidad | None:
         """Busca una entidad por su valor (crudo o no: se normaliza antes de buscar)."""
+        # OPTIMIZACIÓN (bitácora, entrada 005): la primera versión llamaba a
+        # self.entidades(tipo) y filtraba en Python. Eso recalculaba la
+        # confianza de TODO el caso en cada búsqueda: con 40.000 entidades,
+        # 150 ms por búsqueda. Ahora: una consulta que usa el índice
+        # UNIQUE(tipo, clave) y solo calcula la confianza de esa entidad.
         clave = normalizar(tipo, valor)
-        return next((e for e in self.entidades(tipo) if e.clave == clave), None)
+        fila = self._con.execute(
+            "SELECT * FROM entidades WHERE tipo = ? AND clave = ?", (str(tipo), clave)
+        ).fetchone()
+        if fila is None:
+            return None
+        obs = self._con.execute(
+            "SELECT c.herramienta, o.confianza_fuente "
+            "FROM observaciones o JOIN corridas c ON c.id = o.corrida_id "
+            "WHERE o.entidad_id = ?",
+            (fila["id"],),
+        ).fetchall()
+        # La atribución sí necesita el grafo completo (se propaga desde las
+        # anclas), así que solo se calcula si hay anclas. Mejora pendiente:
+        # cachearla y recalcular solo cuando cambian los datos.
+        atribucion_ent = None
+        if self._hay_anclas():
+            atribucion_ent = self.atribuciones().get(fila["id"], 0.0)
+        return Entidad(
+            id=fila["id"],
+            tipo=TipoEntidad(fila["tipo"]),
+            valor=fila["valor"],
+            clave=fila["clave"],
+            confianza=confidence.combinar((o["herramienta"], o["confianza_fuente"]) for o in obs),
+            atribucion=atribucion_ent,
+        )
 
     def relaciones(self) -> list[Relacion]:
         filas = self._con.execute("SELECT * FROM relaciones ORDER BY id").fetchall()
@@ -626,4 +655,13 @@ def _conectar(ruta: Path) -> sqlite3.Connection:
     # SQLite NO revisa las claves foráneas (REFERENCES) a menos que se lo pidas,
     # conexión por conexión. Es una de las sorpresas clásicas de SQLite.
     con.execute("PRAGMA foreign_keys = ON")
+    # WAL (Write-Ahead Logging): los cambios se escriben primero a un archivo
+    # aparte (case.sqlite-wal) y luego se integran. Ventajas: escrituras más
+    # rápidas y lectores que no se bloquean mientras alguien escribe (útil
+    # cuando la web local lea el caso mientras la CLI importa).
+    con.execute("PRAGMA journal_mode = WAL")
+    # Con WAL, synchronous=NORMAL sigue siendo seguro ante cortes del programa;
+    # ante un corte de luz se podría perder la última transacción, pero la base
+    # nunca queda corrupta. Es el ajuste recomendado por la documentación de SQLite.
+    con.execute("PRAGMA synchronous = NORMAL")
     return con

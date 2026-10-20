@@ -15,6 +15,56 @@ Cada entrada registra qué se hizo, qué se descubrió, qué salió mal y qué c
 
 ---
 
+## Entrada 005 · 2026-10-20 · Primera medición de rendimiento
+
+Pregunta de Amaro: ¿qué tan pesado es? La ligereza es prioridad porque copperscript apunta a países con pocos recursos, investigadores independientes y periodistas en riesgo. Regla: **no se optimiza a ojo, se mide**.
+
+**Qué se hizo**
+- `herramientas/benchmark.py`: genera un caso sintético grande con el formato real de Sherlock y SpiderFoot (dominios `.example` del RFC 2606, IPs `198.18.0.0/15` del RFC 2544, reservadas para documentación y pruebas) y cronometra cada operación.
+- Perfilado con `cProfile` de las dos operaciones lentas.
+- Dos correcciones, con medición antes y después.
+
+**Mediciones** (caso de 5.000 usuarios: 40.005 entidades, base de datos de 13,6 MB)
+
+| Operación | Antes | Después |
+|---|---|---|
+| Importar Sherlock (30.000 filas) | 0,66 s | 0,71 s |
+| Importar SpiderFoot (20.000 eventos) | 0,76 s | 0,73 s |
+| Listar entidades con confianza | 0,34 s | 0,37 s |
+| 100 búsquedas | **15,39 s** | **< 0,01 s** |
+| Exportar HTML | 1,09 s | 0,92 s |
+| Exportar Obsidian (todo) | 8,76 s | 7,25 s* |
+| Memoria máxima del proceso | 125 MB | 125 MB |
+| Arranque de la CLI | 0,22 s | — |
+
+\* El tiempo de Obsidian varía mucho entre corridas (lo domina el disco). Con `--minimo 0.8` se exportan 19.937 notas en vez de 40.005.
+
+**Hallazgos**
+- **Mi primera sospecha era incorrecta.** Creí que la consulta de vecinos (`WHERE origen_id = ? OR destino_id = ?`) recorría la tabla entera. `EXPLAIN QUERY PLAN` mostró que SQLite usa los dos índices a la vez (`MULTI-INDEX OR`). Lección: preguntarle al motor cómo planea la consulta antes de "arreglarla".
+- **Búsqueda**: cada `buscar()` llamaba a `entidades()` y filtraba en Python, lo que recalculaba la confianza de **todo** el caso para devolver una sola entidad (320.220 llamadas a `combinar` en 20 búsquedas). Ahora usa el índice `UNIQUE(tipo, clave)` y calcula solo esa entidad.
+- **Obsidian**: el 70% del tiempo es abrir archivos en el disco (16.011 llamadas a `open`). Eso no lo arregla un código más rápido: lo arregla escribir menos archivos. Y es lo útil: una bóveda de 40.000 notas no sirve en Obsidian. Se agregó `--minimo` y se reemplazó una consulta de vecinos por entidad por una sola consulta agrupada en memoria.
+- **Importar es rápido**: 50.000 filas en 1,5 s, gracias a hacer cada importación en una sola transacción (entrada 001).
+- **Las dependencias pesan más que nuestro código.** El núcleo carga en 0,07 s; la CLI tarda 0,22 s porque Typer arrastra `rich`, `pygments` y `markdown-it-py` (unos 15 MB instalados, la mayoría para colorear texto).
+- SQLite ahora usa `journal_mode = WAL` y `synchronous = NORMAL`: escrituras más rápidas y lectores que no se bloquean cuando alguien escribe.
+
+**Cambios de filosofía**
+- La ligereza no es solo velocidad. Para un periodista en riesgo también es **no hacer conexiones innecesarias**: el grafo HTML carga Cytoscape desde un CDN, y abrir el archivo le avisa a ese servidor desde qué IP y a qué hora alguien abrió un caso. Eso es un problema de seguridad operacional (OPSEC), no solo de rendimiento.
+
+**Para main**
+- `buscar()` por índice desde el primer día (el stub ya lo pide implícitamente: "se normaliza antes de buscar").
+- PRAGMAs de WAL en `_conectar()`.
+
+**Próximos pasos** (por impacto para usuarios con pocos recursos)
+1. Incluir Cytoscape dentro del paquete y no cargar nada desde internet (OPSEC + sin conexión).
+2. Evaluar reemplazar Typer por `argparse` (librería estándar): cero dependencias, arranque más rápido, instalación posible sin internet.
+3. Exportar alrededor de una entidad (vecindario a N saltos) en vez de todo el caso.
+4. Cachear confianza y atribución y recalcular solo cuando cambian los datos.
+5. Leer el JSON de SpiderFoot en streaming para escaneos de cientos de MB.
+6. Cifrado del caso en reposo (SQLCipher) para equipos que pueden ser incautados.
+7. Distribución como ejecutable único para quien no puede instalar Python.
+
+---
+
 ## Entrada 004 · 2026-10-20 · Reconocimiento de otras colonias (ADR-014)
 
 Esta salida no trae código: es **reconocimiento**. Antes de diseñar plantillas configurables, la scout fue a ver cómo lo resolvieron proyectos que llevan años en esto. Se leyó directamente su código y sus esquemas, no resúmenes.

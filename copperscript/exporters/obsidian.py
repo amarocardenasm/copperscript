@@ -33,26 +33,45 @@ _PROHIBIDOS = re.compile(r'[\\/:*?"<>|#^\[\]]+')
 UMBRAL_POR_VERIFICAR = 0.5
 
 
-def exportar_obsidian(caso: Caso) -> Path:
-    """Regenera la bóveda y devuelve su carpeta."""
+def exportar_obsidian(caso: Caso, minimo: float = 0.0) -> Path:
+    """Regenera la bóveda y devuelve su carpeta.
+
+    minimo: solo exporta entidades con confianza >= minimo (y, si el caso
+    tiene anclas, con atribución >= minimo). Ver OPTIMIZACIÓN más abajo.
+    """
     destino = caso.carpeta_exports / "obsidian"
     if destino.exists():
         shutil.rmtree(destino)  # regenerar desde cero: la base de datos manda
 
-    entidades = {e.id: e for e in caso.entidades()}
+    # OPTIMIZACIÓN (bitácora, entrada 005): el perfil mostró que el 70% del
+    # tiempo es abrir archivos en el disco, uno por entidad. Eso no se arregla
+    # con código más rápido: se arregla escribiendo MENOS archivos. Y es lo
+    # útil, además: una bóveda con 40.000 notas es inusable en Obsidian.
+    entidades = {
+        e.id: e
+        for e in caso.entidades()
+        if e.confianza >= minimo and (e.atribucion is None or e.atribucion >= minimo)
+    }
     nombres = _nombres_unicos(entidades.values())
 
-    for entidad in entidades.values():
-        lineas_vecinos = []
-        for relacion, otro_id in caso.vecinos(entidad.id):
-            otro = entidades[otro_id]
+    # Una sola consulta para todas las relaciones, agrupadas en memoria,
+    # en vez de una consulta de vecinos por cada entidad.
+    vecinos: dict[int, list[str]] = {}
+    for relacion in caso.relaciones():
+        if relacion.origen_id in entidades and relacion.destino_id in entidades:
+            o, d = relacion.origen_id, relacion.destino_id
             # La flecha indica la dirección real de la relación.
-            flecha = "→" if relacion.origen_id == entidad.id else "←"
-            lineas_vecinos.append(f"- {relacion.tipo} {flecha} [[{nombres[otro.id]}]]")
+            vecinos.setdefault(o, []).append(f"- {relacion.tipo} → [[{nombres[d]}]]")
+            vecinos.setdefault(d, []).append(f"- {relacion.tipo} ← [[{nombres[o]}]]")
 
-        nota = destino / str(entidad.tipo) / f"{nombres[entidad.id]}.md"
-        nota.parent.mkdir(parents=True, exist_ok=True)
-        nota.write_text(_contenido_nota(entidad, lineas_vecinos), encoding="utf-8")
+    carpetas_creadas: set[Path] = set()
+    for entidad in entidades.values():
+        carpeta = destino / str(entidad.tipo)
+        if carpeta not in carpetas_creadas:  # mkdir una vez por tipo, no por nota
+            carpeta.mkdir(parents=True, exist_ok=True)
+            carpetas_creadas.add(carpeta)
+        nota = carpeta / f"{nombres[entidad.id]}.md"
+        nota.write_text(_contenido_nota(entidad, vecinos.get(entidad.id, [])), encoding="utf-8")
     return destino
 
 
