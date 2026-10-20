@@ -1,0 +1,5 @@
+username,name,url_main,url_user,exists,http_status,response_time_s
+amaro_dev,GitHub,https://www.github.com/,https://www.github.com/amaro_dev,Claimed,200,0.31
+amaro_dev,Reddit,https://www.reddit.com/,https://www.reddit.com/user/amaro_dev,Claimed,200,0.52
+amaro_dev,Instagram,https://www.instagram.com/,https://www.instagram.com/amaro_dev,Available,404,0.40
+amaro_dev,Twitch,https://www.twitch.tv/,https://www.twitch.tv/amaro_dev,Unknown,,

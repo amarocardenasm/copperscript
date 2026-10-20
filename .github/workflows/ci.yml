@@ -1,0 +1,27 @@
+# Integración continua: en cada push y pull request, GitHub ejecuta esto en
+# una máquina limpia. Si algo falla, aparece una X roja junto al commit.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pruebas:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]  # probamos en varias versiones de Python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Instalar
+        run: pip install -e ".[dev]"
+      - name: Estilo (ruff)
+        run: |
+          ruff check .
+          ruff format --check .
+      - name: Tests (los PENDIENTES aparecen como skipped)
+        run: pytest -rs

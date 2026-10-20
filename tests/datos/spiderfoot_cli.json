@@ -1,0 +1,5 @@
+[{"generated": 1760900000, "type": "Internet Name", "data": "www.ejemplo.cl", "module": "sfp_dnsresolve", "source": "ejemplo.cl"},
+{"generated": 1760900001, "type": "IP Address", "data": "192.0.2.10", "module": "sfp_dnsresolve", "source": "www.ejemplo.cl"},
+{"generated": 1760900002, "type": "Email Address", "data": "Contacto@Ejemplo.CL", "module": "sfp_email", "source": "www.ejemplo.cl"},
+{"generated": 1760900003, "type": "Username", "data": "amaro_dev", "module": "sfp_accounts", "source": "Contacto@Ejemplo.CL"},
+{"generated": 1760900004, "type": "Open TCP Port", "data": "192.0.2.10:443", "module": "sfp_portscan_tcp", "source": "192.0.2.10"}]

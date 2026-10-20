@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+build/
+dist/
+.idea/
+.vscode/
+# Casos de prueba locales: pueden contener datos personales reales.
+casos/
+*.sqlite

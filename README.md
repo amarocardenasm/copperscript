@@ -8,14 +8,41 @@ Raw collection is noisy: results are often incomplete, duplicated or uncertain. 
 
 ## Status
 
-Early development. Nothing to install yet.
+Early development (v0.1 in progress). The core is designed as **stubs**: functions with types and docstrings whose tests already exist. Run `pytest -rs` to see what is still pending.
+
+## Branches
+
+| Branch | What it is |
+|---|---|
+| `main` | The real project. Core modules are stubs being implemented step by step. |
+| `spike/v0.1-referencia` | A complete, heavily commented reference implementation of v0.1 (in Spanish), used to explore the design and anticipate problems. **Never merged into `main`.** |
+
+## Development
+
+```bash
+git clone https://github.com/amarocardenasm/copperscript
+cd copperscript
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -e ".[dev]"
+pytest -rs          # PENDIENTE = stub not implemented yet
+ruff check .        # style
+```
+
+Planned CLI (v0.1):
+
+```bash
+copperscript nuevo mi-caso --nombre "Prueba" --objetivo "Huella de un usuario"
+copperscript importar mi-caso amaro_dev.csv      # Sherlock, SpiderFoot (auto-detected)
+copperscript entidades mi-caso
+copperscript exportar mi-caso obsidian           # or: html
+```
 
 ## Principles
 
 - **Keyless first**: useful without paying for any API.
 - **Bring your own key**: paid or account-based sources are optional modules.
 - **Local and private**: your cases live on your machine.
-- **Passive and public sources only**: see [USO-RESPONSABLE / Responsible use](#responsible-use).
+- **Passive and public sources only**: see [USO-RESPONSABLE.md](USO-RESPONSABLE.md).
 
 ## Licensing
 
@@ -32,6 +59,6 @@ Contributions are welcome. Because copperscript is dual-licensed, every contribu
 
 ## Responsible use
 
-copperscript is meant for lawful investigation, security research and education. Use only public, passive sources, define the scope of each case before starting, and respect the privacy and data-protection laws of your country.
+copperscript is meant for lawful investigation, security research and education. Use only public, passive sources, define the scope of each case before starting, and respect the privacy and data-protection laws of your country. Full principles in [USO-RESPONSABLE.md](USO-RESPONSABLE.md).
 
 Copyright (C) 2026 @amarocardenasm

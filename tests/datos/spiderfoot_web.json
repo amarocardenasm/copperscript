@@ -1,0 +1,2 @@
+[{"data": "www.ejemplo.cl", "event_type": "INTERNET_NAME", "module": "sfp_dnsresolve", "source_data": "ejemplo.cl", "false_positive": 0, "last_seen": "2026-10-20 03:00:00", "scan_name": "prueba", "scan_target": "ejemplo.cl"},
+{"data": "mail.ejemplo.cl", "event_type": "INTERNET_NAME", "module": "sfp_dnsbrute", "source_data": "ejemplo.cl", "false_positive": 1, "last_seen": "2026-10-20 03:00:01", "scan_name": "prueba", "scan_target": "ejemplo.cl"}]
