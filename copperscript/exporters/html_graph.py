@@ -38,6 +38,7 @@ def exportar_html(caso: Caso) -> Path:
     """Escribe exports/grafo.html y devuelve su ruta."""
     # Cytoscape recibe "elementos": nodos y aristas en un mismo arreglo JSON.
     elementos = []
+    anclas = caso.anclas()
     for e in caso.entidades():
         elementos.append(
             {
@@ -46,6 +47,9 @@ def exportar_html(caso: Caso) -> Path:
                     "label": e.valor,
                     "tipo": str(e.tipo),
                     "confianza": e.confianza,
+                    # ADR-013 (spike): -1 = "no aplica" (Cytoscape no maneja bien null).
+                    "atribucion": -1 if e.atribucion is None else e.atribucion,
+                    "ancla": e.id in anclas,
                     "color": _COLORES.get(str(e.tipo), "#9ca3af"),
                 }
             }
@@ -89,7 +93,7 @@ _PLANTILLA = """<!doctype html>
 <script src="__CDN__"></script>
 </head>
 <body>
-<header><strong>__TITULO__</strong><small>Línea punteada = por verificar (confianza &lt; 0.5)</small></header>
+<header><strong>__TITULO__</strong><small>Punteado = por verificar · Doble borde = ancla · Tenue = poco atribuible al objetivo</small></header>
 <div id="grafo"></div>
 <script>
 const elementos = __DATOS__;
@@ -103,6 +107,9 @@ cytoscape({
         "font-size": 10, "text-valign": "bottom", "text-margin-y": 4,
         "width": "mapData(confianza, 0, 1, 14, 34)",   // más confianza = nodo más grande
         "height": "mapData(confianza, 0, 1, 14, 34)" } },
+    { selector: "node[?ancla]", style: {
+        "border-width": 4, "border-style": "double", "border-color": "#22201d" } },
+    { selector: "node[atribucion >= 0][atribucion < 0.3]", style: { "opacity": 0.45 } },
     { selector: "node[confianza < 0.5]", style: {
         "border-width": 2, "border-style": "dashed", "border-color": "#a8552c" } },
     { selector: "edge", style: {

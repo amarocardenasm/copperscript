@@ -67,6 +67,8 @@ def _contenido_nota(entidad: Entidad, vecinos: list[str]) -> str:
         f'valor: "{valor_yaml}"',
         f"confianza: {entidad.confianza}",
         f"por_verificar: {por_verificar}",
+        # ADR-013 (spike): solo aparece si el caso tiene anclas.
+        *([f"atribucion: {entidad.atribucion}"] if entidad.atribucion is not None else []),
         f"copperscript_id: {entidad.id}",
         "---",
         "",

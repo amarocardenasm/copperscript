@@ -1,6 +1,6 @@
 # copperscript
 
-> ⚠️ **You are on `spike/v0.1-referencia`.** This branch is a complete, heavily commented reference implementation (comments in Spanish) used for learning and to anticipate design problems. It is **never merged into `main`**; `main` is implemented step by step from its stubs.
+> ⚠️ **You are on `spike/v0.1-referencia`.** This branch is a complete, heavily commented reference implementation (comments in Spanish) used for learning and to anticipate design problems. It is **never merged into `main`**; `main` is implemented step by step from its stubs. It also explores features ahead of `main` (currently v0.2: attribution and Bayesian hypotheses). Read the scout's log in [BITACORA.md](BITACORA.md).
 
 **copperscript** is an open-source OSINT tool that organizes collected data and displays it as an interactive graph.
 

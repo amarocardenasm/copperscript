@@ -1,6 +1,7 @@
 """El caso: una carpeta con una base SQLite, evidencia y exportaciones (ADR-003).
 
 === IMPLEMENTACIÓN DE REFERENCIA (rama spike/v0.1-referencia) ===
+v0.2 explorada aquí: migraciones de esquema, anclas, atribución e hipótesis (ADR-013).
 
     mi-caso/
     ├── case.sqlite   <- este módulo
@@ -21,7 +22,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from copperscript.core import confidence
+from copperscript.core import atribucion, confidence, hipotesis
 from copperscript.core.evidence import guardar_evidencia
 from copperscript.core.models import (
     Corrida,
@@ -39,7 +40,7 @@ if TYPE_CHECKING:  # solo para el editor y ruff; evita importaciones circulares 
 ARCHIVO_DB = "case.sqlite"
 CARPETA_EVIDENCIA = "evidence"
 CARPETA_EXPORTS = "exports"
-VERSION_ESQUEMA = 1
+VERSION_ESQUEMA = 2  # ver _MIGRACIONES más abajo
 
 # El esquema traduce el diagrama entidad-relación a tablas.
 # Detalles que conviene notar:
@@ -108,6 +109,65 @@ CREATE INDEX IF NOT EXISTS idx_rel_destino ON relaciones(destino_id);
 CREATE INDEX IF NOT EXISTS idx_obs_entidad ON observaciones(entidad_id);
 """
 
+# --- MIGRACIONES -------------------------------------------------------------
+# _ESQUEMA de arriba es la versión 1 y NO se vuelve a tocar. Cada cambio
+# posterior es una migración numerada. ¿Por qué no editar _ESQUEMA y listo?
+# Porque los casos que ya existen en el disco de alguien tienen la versión
+# vieja: si solo cambiamos el esquema de los casos NUEVOS, los viejos se
+# rompen al abrirlos. Con migraciones, cualquier caso (nuevo o viejo) pasa
+# por los mismos pasos y termina idéntico. Es lo que hacen Django, Rails,
+# Alembic y cualquier proyecto serio con base de datos.
+#
+# Regla de oro: una migración ya publicada nunca se edita; si hay un error,
+# se corrige con una migración NUEVA.
+_MIGRACIONES: dict[int, str] = {
+    # v2 (ADR-013): atribución con anclas e hipótesis bayesianas.
+    2: """
+    -- Anclas: entidades que el analista verificó como del objetivo.
+    CREATE TABLE anclas (
+        entidad_id INTEGER PRIMARY KEY REFERENCES entidades(id),
+        nota       TEXT NOT NULL DEFAULT '',
+        fecha      TEXT NOT NULL
+    );
+    -- ALTER TABLE ... ADD COLUMN es de lo poco que SQLite permite cambiar
+    -- en una tabla existente. El DEFAULT rellena las filas que ya había.
+    ALTER TABLE hipotesis ADD COLUMN prior REAL NOT NULL DEFAULT 0.5;
+    -- Evidencias de una hipótesis, cada una con su razón de verosimilitud.
+    -- CHECK hace que la base de datos rechace un LR imposible (<= 0).
+    CREATE TABLE evidencias_hipotesis (
+        id             INTEGER PRIMARY KEY,
+        hipotesis_id   INTEGER NOT NULL REFERENCES hipotesis(id),
+        descripcion    TEXT NOT NULL,
+        lr             REAL NOT NULL CHECK (lr > 0),
+        observacion_id INTEGER REFERENCES observaciones(id),
+        fecha          TEXT NOT NULL
+    );
+    CREATE INDEX idx_evid_hipotesis ON evidencias_hipotesis(hipotesis_id);
+    """,
+}
+
+# Nombre de la "herramienta" cuando el dato lo afirma el propio analista.
+HERRAMIENTA_ANALISTA = "analista"
+
+
+@dataclass
+class EvidenciaHipotesis:
+    descripcion: str
+    lr: float
+    decibanes: float
+
+
+@dataclass
+class EvaluacionHipotesis:
+    """Una hipótesis con su probabilidad previa, posterior y el desglose."""
+
+    id: int
+    texto: str
+    estado: str
+    prior: float
+    posterior: float
+    evidencias: list[EvidenciaHipotesis]
+
 
 class CasoNoEncontrado(FileNotFoundError):
     """La carpeta no contiene un case.sqlite."""
@@ -163,18 +223,56 @@ class Caso:
                     ("objetivo", objetivo),
                     ("alcance", alcance),
                     ("creado", datetime.now(UTC).isoformat()),
-                    ("version_esquema", str(VERSION_ESQUEMA)),
+                    # Se crea en v1 y se migra: así los casos nuevos y los
+                    # viejos recorren exactamente el mismo camino.
+                    ("version_esquema", "1"),
                 ],
             )
+        caso._migrar()
         return caso
 
     @classmethod
     def abrir(cls, carpeta: Path) -> Caso:
-        """Abre un caso existente."""
+        """Abre un caso existente y lo migra a la última versión del esquema."""
         ruta_db = carpeta / ARCHIVO_DB
         if not ruta_db.exists():
             raise CasoNoEncontrado(f"no hay un caso en {carpeta} (falta {ARCHIVO_DB})")
-        return cls(carpeta, _conectar(ruta_db))
+        caso = cls(carpeta, _conectar(ruta_db))
+        caso._migrar()
+        return caso
+
+    def version_esquema(self) -> int:
+        consulta = "SELECT valor FROM meta WHERE clave = 'version_esquema'"
+        fila = self._con.execute(consulta).fetchone()
+        return int(fila["valor"]) if fila else 1
+
+    def _migrar(self) -> None:
+        """Aplica en orden las migraciones que le falten a este caso."""
+        actual = self.version_esquema()
+        if actual > VERSION_ESQUEMA:
+            # Un caso creado con una versión MÁS NUEVA de copperscript: no
+            # sabemos qué cambió, así que no lo tocamos.
+            raise RuntimeError(
+                f"este caso usa el esquema v{actual}, pero esta versión de copperscript "
+                f"solo conoce hasta v{VERSION_ESQUEMA}. Actualiza copperscript."
+            )
+        for version in range(actual + 1, VERSION_ESQUEMA + 1):
+            # Cada migración es su propia transacción, junto con el cambio de
+            # versión: o se aplica entera y queda registrada, o no pasa nada.
+            # executescript no participa de transacciones abiertas, por eso
+            # escribimos BEGIN/COMMIT a mano dentro del mismo script.
+            try:
+                self._con.executescript(
+                    "BEGIN;\n"
+                    + _MIGRACIONES[version]
+                    + f"\nUPDATE meta SET valor = '{version}' WHERE clave = 'version_esquema';\n"
+                    + "COMMIT;"
+                )
+            except sqlite3.Error:
+                # Si una sentencia falla, el BEGIN quedó abierto: deshacemos.
+                if self._con.in_transaction:
+                    self._con.rollback()
+                raise
 
     def cerrar(self) -> None:
         self._con.close()
@@ -345,6 +443,9 @@ class Caso:
                 "SELECT * FROM entidades WHERE tipo = ? ORDER BY clave", (str(tipo),)
             ).fetchall()
         confianzas = self._confianzas()
+        # Sin anclas no hay objetivo conocido: la atribución queda en None
+        # ("no aplica"), que es distinto de 0.0 ("no le pertenece").
+        atribuciones = self.atribuciones(confianzas) if self._hay_anclas() else None
         return [
             Entidad(
                 id=fila["id"],
@@ -352,6 +453,7 @@ class Caso:
                 valor=fila["valor"],
                 clave=fila["clave"],
                 confianza=confianzas.get(fila["id"], 0.0),
+                atribucion=None if atribuciones is None else atribuciones.get(fila["id"], 0.0),
             )
             for fila in filas
         ]
@@ -403,6 +505,118 @@ class Caso:
                 (f["herramienta"], f["confianza_fuente"])
             )
         return {eid: confidence.combinar(obs) for eid, obs in por_entidad.items()}
+
+    def _confianzas_relaciones(self) -> dict[int, float]:
+        """Confianza de cada relación: igual que las entidades, desde sus observaciones."""
+        filas = self._con.execute(
+            "SELECT o.relacion_id, c.herramienta, o.confianza_fuente "
+            "FROM observaciones o JOIN corridas c ON c.id = o.corrida_id "
+            "WHERE o.relacion_id IS NOT NULL"
+        ).fetchall()
+        por_relacion: dict[int, list[tuple[str, float]]] = {}
+        for f in filas:
+            por_relacion.setdefault(f["relacion_id"], []).append(
+                (f["herramienta"], f["confianza_fuente"])
+            )
+        return {rid: confidence.combinar(obs) for rid, obs in por_relacion.items()}
+
+    # ------------------------------------------------------------------
+    # ADR-013 · Objetivo conocido: anclas y atribución
+    # ------------------------------------------------------------------
+
+    def anclar(self, tipo: TipoEntidad, valor: str, nota: str = "") -> int:
+        """Marca una entidad como verificada por el analista (le pertenece al objetivo).
+
+        Si la entidad no existía, se crea. En ambos casos queda una observación
+        de la "herramienta" analista con confianza 1.0: el analista también es
+        una fuente, y su afirmación debe quedar registrada como cualquier otra.
+        Devuelve el id de la entidad.
+        """
+        ahora = datetime.now(UTC)
+        with self._con:
+            corrida_id = self._registrar_corrida(
+                Corrida(herramienta=HERRAMIENTA_ANALISTA, fecha=ahora, comando=f"anclar {valor}")
+            )
+            obs = Observacion(
+                entidad=RefEntidad(tipo, valor), confianza_fuente=1.0, atributos={"ancla": True}
+            )
+            self._registrar_observacion(corrida_id, obs)
+            entidad_id, _ = self._obtener_o_crear(obs.entidad)
+            # INSERT OR REPLACE: si ya era ancla, actualiza la nota y la fecha.
+            self._con.execute(
+                "INSERT OR REPLACE INTO anclas (entidad_id, nota, fecha) VALUES (?, ?, ?)",
+                (entidad_id, nota, ahora.isoformat()),
+            )
+        return entidad_id
+
+    def anclas(self) -> set[int]:
+        return {f["entidad_id"] for f in self._con.execute("SELECT entidad_id FROM anclas")}
+
+    def _hay_anclas(self) -> bool:
+        return self._con.execute("SELECT 1 FROM anclas LIMIT 1").fetchone() is not None
+
+    def atribuciones(self, existencia: dict[int, float] | None = None) -> dict[int, float]:
+        """Atribución al objetivo de cada entidad alcanzable desde las anclas."""
+        existencia = existencia if existencia is not None else self._confianzas()
+        conf_rel = self._confianzas_relaciones()
+        aristas = [
+            (r.origen_id, r.destino_id, r.tipo, conf_rel.get(r.id, 0.0)) for r in self.relaciones()
+        ]
+        return atribucion.propagar(self.anclas(), aristas, existencia)
+
+    # ------------------------------------------------------------------
+    # ADR-013 · Objetivo desconocido: hipótesis en competencia
+    # ------------------------------------------------------------------
+
+    def crear_hipotesis(self, texto: str, prior: float = 0.5) -> int:
+        """Registra una hipótesis con su probabilidad previa. Devuelve su id."""
+        hipotesis.a_odds(prior)  # valida 0 < prior < 1 antes de tocar la base
+        with self._con:
+            cursor = self._con.execute(
+                "INSERT INTO hipotesis (texto, prior) VALUES (?, ?)", (texto, prior)
+            )
+        return int(cursor.lastrowid or 0)
+
+    def agregar_evidencia(
+        self,
+        hipotesis_id: int,
+        descripcion: str,
+        lr: float,
+        observacion_id: int | None = None,
+    ) -> None:
+        """Suma una evidencia a una hipótesis. lr > 1 apoya, lr < 1 contradice."""
+        hipotesis.decibanes(lr)  # valida lr > 0 con un mensaje claro
+        with self._con:
+            self._con.execute(
+                "INSERT INTO evidencias_hipotesis "
+                "(hipotesis_id, descripcion, lr, observacion_id, fecha) VALUES (?, ?, ?, ?, ?)",
+                (hipotesis_id, descripcion, lr, observacion_id, datetime.now(UTC).isoformat()),
+            )
+
+    def evaluar_hipotesis(self, hipotesis_id: int) -> EvaluacionHipotesis:
+        """Probabilidad posterior de una hipótesis, con el aporte de cada evidencia."""
+        fila = self._con.execute("SELECT * FROM hipotesis WHERE id = ?", (hipotesis_id,)).fetchone()
+        if fila is None:
+            raise KeyError(f"no existe la hipótesis {hipotesis_id}")
+        evidencias = [
+            EvidenciaHipotesis(e["descripcion"], e["lr"], round(hipotesis.decibanes(e["lr"]), 2))
+            for e in self._con.execute(
+                "SELECT * FROM evidencias_hipotesis WHERE hipotesis_id = ? ORDER BY id",
+                (hipotesis_id,),
+            )
+        ]
+        return EvaluacionHipotesis(
+            id=fila["id"],
+            texto=fila["texto"],
+            estado=fila["estado"],
+            prior=fila["prior"],
+            posterior=round(hipotesis.posterior(fila["prior"], [e.lr for e in evidencias]), 6),
+            evidencias=evidencias,
+        )
+
+    def lista_hipotesis(self) -> list[EvaluacionHipotesis]:
+        ids = [f["id"] for f in self._con.execute("SELECT id FROM hipotesis ORDER BY id")]
+        return [self.evaluar_hipotesis(i) for i in ids]
 
 
 def _conectar(ruta: Path) -> sqlite3.Connection:

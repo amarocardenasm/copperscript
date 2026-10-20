@@ -107,7 +107,10 @@ class Entidad:
     tipo: TipoEntidad
     valor: str
     clave: str
-    confianza: float = 0.0  # calculada a partir de sus observaciones, no se guarda
+    confianza: float = 0.0  # EXISTENCIA: calculada desde sus observaciones, no se guarda
+    # ATRIBUCIÓN al objetivo (ADR-013): None si el caso no tiene anclas.
+    # Spike: este campo todavía no existe en main.
+    atribucion: float | None = None
 
 
 @dataclass
