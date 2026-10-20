@@ -1,0 +1,118 @@
+# BORRADOR (spike) · Plantilla de investigación: corrupción
+# Formato propuesto en ADR-014, inspirado en FollowTheMoney (FtM).
+# Todavía no hay código que la lea: es el "plano" que la próxima salida de
+# la scout tiene que poder cargar sin modificar el núcleo.
+#
+# Los nombres en `ftm:` indican el tipo equivalente en FollowTheMoney, para
+# poder exportar el caso a ese ecosistema (Aleph, OpenSanctions).
+
+plantilla: corrupcion
+version: 1
+extiende: base          # tipos técnicos: dominio, IP, email, URL, usuario, cuenta
+descripcion: >
+  Personas, organismos públicos, empresas y contratos, con sus vínculos
+  laborales, societarios y familiares.
+
+tipos:
+  persona:
+    ftm: Person
+    campos:
+      nombre:       {tipo: texto, obligatorio: true, mostrar: true}
+      rut:          {tipo: rut, identificador: true}  # el RUT sí identifica; el nombre no
+      fecha_nacimiento: {tipo: fecha}
+      nacionalidad: {tipo: pais}
+    # Igual que FtM y MISP: el nombre de pila NO sirve para resolver entidades.
+
+  empresa:
+    ftm: Company
+    campos:
+      razon_social: {tipo: texto, obligatorio: true, mostrar: true}
+      rut:          {tipo: rut, identificador: true}
+      fecha_constitucion: {tipo: fecha}
+
+  organismo_publico:
+    ftm: PublicBody
+    campos:
+      nombre: {tipo: texto, obligatorio: true, identificador: true, mostrar: true}
+
+  # Un contrato puede involucrar a más de dos partes (comprador, adjudicado,
+  # firmantes). Por eso es una ENTIDAD conectada a cada parte, no una arista.
+  # Es la advertencia de FtM: "no todo intervalo es una arista".
+  contrato:
+    ftm: Contract
+    campos:
+      titulo:   {tipo: texto, mostrar: true}
+      codigo:   {tipo: texto, identificador: true}  # ej. código de licitación
+      monto:    {tipo: monto}
+      fecha:    {tipo: fecha}
+      documento: {tipo: evidencia}  # hash de la copia guardada (ADR-004)
+
+relaciones:
+  trabaja_en:
+    ftm: Employment
+    de: persona
+    a: [organismo_publico, empresa]
+    inversa: "emplea a"
+    temporal: true          # exige fecha de inicio y de término (o "vigente")
+    campos:
+      cargo: {tipo: texto, mostrar: true}
+    peso: 0.8               # atribución que deja pasar (ADR-013)
+    lr: 5                   # LR sugerido si dos perfiles comparten este vínculo
+
+  es_directivo_de:
+    ftm: Directorship
+    de: persona
+    a: [empresa, organismo_publico]
+    inversa: "es dirigida por"
+    temporal: true
+    campos:
+      cargo: {tipo: texto}
+    peso: 0.85
+
+  es_socio_de:
+    ftm: Ownership
+    de: [persona, empresa]
+    a: empresa
+    inversa: "tiene como socio a"
+    temporal: true
+    campos:
+      porcentaje: {tipo: numero}
+    peso: 0.85
+
+  es_pariente_de:
+    ftm: Family
+    de: persona
+    a: persona
+    dirigida: false
+    campos:
+      parentesco: {tipo: texto}
+    tercero: true           # el pariente no es el objetivo: oculto por defecto al exportar
+    peso: 0.6
+
+  es_cercano_a:
+    ftm: Associate
+    de: persona
+    a: persona
+    dirigida: false
+    campos:
+      naturaleza: {tipo: texto}  # cómo se sabe del vínculo
+    tercero: true
+    peso: 0.4               # vínculo blando: deja pasar poca atribución
+
+  adjudica:
+    de: organismo_publico
+    a: contrato
+    inversa: "adjudicado por"
+    peso: 0.9
+
+  es_adjudicatario_de:
+    de: empresa
+    a: contrato
+    inversa: "adjudicado a"
+    peso: 0.9
+
+  firma:
+    de: persona
+    a: contrato
+    inversa: "firmado por"
+    peso: 0.9

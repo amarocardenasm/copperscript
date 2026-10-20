@@ -15,6 +15,36 @@ Cada entrada registra qué se hizo, qué se descubrió, qué salió mal y qué c
 
 ---
 
+## Entrada 004 · 2026-10-20 · Reconocimiento de otras colonias (ADR-014)
+
+Esta salida no trae código: es **reconocimiento**. Antes de diseñar plantillas configurables, la scout fue a ver cómo lo resolvieron proyectos que llevan años en esto. Se leyó directamente su código y sus esquemas, no resúmenes.
+
+**Qué se hizo**
+- Lectura de los esquemas YAML de **FollowTheMoney** (Person, Directorship, Associate, Family, Ownership, Interval), del README de **nomenklatura** y de la plantilla `person` de **MISP objects**.
+- ADR-014 registrado en el documento de diseño, con una tabla de referencias e inspiraciones.
+- Borrador de plantilla `plantillas/corrupcion.yaml` en el formato propuesto (4 tipos, 8 relaciones). Es YAML válido y sus relaciones solo apuntan a tipos que existen, pero todavía no hay código que la lea.
+
+**Hallazgos**
+- **Dos proyectos independientes, la misma lección.** FtM no usa el nombre de pila para comparar personas ("demasiados falsos positivos", dice un comentario en su esquema) y MISP marca el nombre con `disable_correlation`. Es exactamente la regla de la rareza que derivamos con Bayes: un valor común no identifica a nadie. Cuando gente con años de casos reales llega a lo mismo que tu teoría, es buena señal.
+- **FtM advierte en mayúsculas que no todo intervalo es una arista**: una sanción toca a una sola entidad y un contrato puede tocar a más de dos. Decisión adoptada: lo que tiene más de dos participantes es una entidad (`contrato`) conectada a cada parte.
+- **FtM ya resolvió el importador genérico** (ADR-010): mapea datos tabulares al modelo con archivos de mapeo. Hay que estudiarlo antes de escribir el nuestro.
+- **nomenklatura guarda "juicios"** de deduplicación (positivo, negativo, no seguro). Nosotros proponemos fusiones al analista, pero no guardamos su respuesta: la próxima importación volvería a preguntar lo mismo. Hay que agregar una tabla de juicios.
+- FtM tiene licencia MIT, compatible con nuestra AGPL. Aun así, no se agrega como dependencia del núcleo: usamos sus conceptos y sus nombres de tipos (para exportar a ese ecosistema), no su librería.
+
+**Cambios de filosofía**
+- De "inventar el modelo" a **"tunear un modelo probado"**. Lo que copperscript agrega sobre FtM es justamente lo que FtM no necesita: atribución, LR por relación, terceros y campos sensibles.
+- El caso de uso de corrupción obliga a pensar en **terceros** (parientes, cercanos) desde el diseño: en esa plantilla son relaciones marcadas `tercero: true`.
+
+**Para main**
+- Nada todavía. ADR-014 depende de ADR-013, que tampoco está en `main`.
+
+**Próximos pasos**
+- Cargador y validador de plantillas: leer el YAML, verificar referencias entre tipos, avisar si un tipo se parece a otro existente.
+- Reescribir los tipos técnicos actuales como plantilla `base` y probar que los 54 tests siguen pasando sin cambiar el núcleo.
+- Tabla de juicios de fusión, inspirada en nomenklatura.
+
+---
+
 ## Entrada 003 · 2026-10-20 · Existir no es pertenecer (ADR-013)
 
 **Qué se hizo**
